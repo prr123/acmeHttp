@@ -335,7 +335,7 @@ func (certobj *CertObj) CreateCerts(cr *CrObj)(err error) {
     rawSubj := subj.ToRDNSequence()
     asn1Subj, _ := asn1.Marshal(rawSubj)
 
-	csrTpl := x509.CertificateRequest{
+	certReqTpl := x509.CertificateRequest{
         RawSubject: asn1Subj,
         SignatureAlgorithm: x509.ECDSAWithSHA256,
         DNSNames: []string{cr.Zone},
@@ -343,17 +343,23 @@ func (certobj *CertObj) CreateCerts(cr *CrObj)(err error) {
     }
 	if certobj.Dbg {
 		log.Printf("debug: csr template:\n")
-		PrintCsr(&csrTpl)
+		PrintCertReq(&certReqTpl)
 	}
 
-	csr, err := x509.CreateCertificateRequest(rand.Reader, &csrTpl, certKey)
+	//certReqb is the binary certificate signing request in DER form
+	certReqB, err := x509.CreateCertificateRequest(rand.Reader, &certReqTpl, certKey)
 	if err != nil {return fmt.Errorf("CreateCertReq: %v",err)}
+	if certobj.Dbg {
+		log.Printf("debug -- success Create Cert Req!\n")
+//		PrintCertReq(certReqB)
+	}
 
-	certReq, err := x509.ParseCertificateRequest(csr)
+	// certReq is a x509.CertificateRequest
+	certReq, err := x509.ParseCertificateRequest(certReqB)
 	if err != nil {return fmt.Errorf("ParseCertificateRequest: %v", err)}
 	if certobj.Dbg {
 		log.Printf("debug -- success Parse Cert Req!\n")
-		PrintCsr(certReq)
+		PrintCertReq(certReq)
 	}
 
 	err = certReq.CheckSignature()
@@ -361,7 +367,7 @@ func (certobj *CertObj) CreateCerts(cr *CrObj)(err error) {
 	if certobj.Dbg {log.Printf("debug -- signature check was successful!\n")}
 
 	// this rew will return the CA cert in addition to the domain cert
-    derCerts, certUrl, err := client.CreateOrderCert(ctx, certobj.FinalUrl, csr, true)
+    derCerts, certUrl, err := client.CreateOrderCert(ctx, certobj.FinalUrl, certReqB, true)
     if err != nil {return fmt.Errorf("CreateOrderCert: %v\n",err)}
 
 	if certobj.Dbg {log.Printf("debug -- success obtained derCerts: %d certUrl: %s\n", len(derCerts), certUrl)}
@@ -631,58 +637,6 @@ func SaveAcmeClient(client *acme.Client, filNam string) (err error) {
     return nil
 }
 
-
-/*
-// function to retrieve keys for LetsEncrypt acme account
-func GetAcmeClient(acntFilnam string) (cl *acme.Client, err error) {
-
-    var client acme.Client
-	dbg :=false
-
-//	LEDir := os.Getenv("LEDir")
-//	if len(LEDir) == 0 {return nil, fmt.Errorf("cannot find LEDir!")}
-
-	if len(acntFilnam) == 0 {
-		return nil, fmt.Errorf("no account name provided\n")
-	}
-	if dbg {log.Printf("info -- account file: %s\n", acntFilnam)}
-
-    acntData, err := os.ReadFile(acntFilnam)
-    if err != nil {return nil, fmt.Errorf("cannot read account file! %v", err)}
-
-    leAcnt := LEObj{}
-
-    err = yaml.Unmarshal(acntData, &leAcnt)
-    if err != nil {return nil, fmt.Errorf("yaml Unmarshal account file: %v\n", err)}
-
-    if dbg {PrintLEAcnt(&leAcnt)}
-
-    pemEncoded, err := os.ReadFile(leAcnt.PrivKeyFilnam)
-    if err != nil {return nil, fmt.Errorf("os.Read Priv Key: %v", err)}
-
-    pemEncodedPub, err := os.ReadFile(leAcnt.PubKeyFilnam)
-    if err != nil {return nil, fmt.Errorf("os.Read Pub Key: %v", err)}
-
-    block, _ := pem.Decode([]byte(pemEncoded))
-    x509Encoded := block.Bytes
-    privateKey, err := x509.ParseECPrivateKey(x509Encoded)
-    if err != nil {return nil, fmt.Errorf("x509.ParseECPivateKey: %v", err)}
-
-    blockPub, _ := pem.Decode([]byte(pemEncodedPub))
-    x509EncodedPub := blockPub.Bytes
-    genericPublicKey, err := x509.ParsePKIXPublicKey(x509EncodedPub)
-    if err != nil {return nil, fmt.Errorf("x509.ParsePKIXKey: %v", err)}
-
-    publicKey := genericPublicKey.(*ecdsa.PublicKey)
-    privateKey.PublicKey = *publicKey
-
-	client.Key = privateKey
-	client.DirectoryURL = leAcnt.LEUrl
-
-    return &client, nil
-}
-*/
-
 // method that creates LE client object and verifies LE account
 func (certobj *CertObj) GetAcmeClient() (err error) {
 
@@ -731,7 +685,6 @@ func (certobj *CertObj) GetAcmeClient() (err error) {
 	client.Key = privateKey
 	client.DirectoryURL = leAcnt.LEUrl
 
-//	ctx := context.Background()
     acnt, err := client.GetReg(ctx, "")
     if err != nil {return fmt.Errorf("error -- LE GetReg: %v\n", err)}
 
@@ -1277,9 +1230,9 @@ func PrintPkixNam(subj pkix.Name) {
     }
 }
 
-func PrintCsr(req *x509.CertificateRequest) {
+func PrintCertReq(req *x509.CertificateRequest) {
 
-	fmt.Println("******************* CSR ********************")
+	fmt.Println("******************* Cert Req ********************")
 	fmt.Printf("DNS Names %d\n", len(req.DNSNames))
 	for i:=0; i< len(req.DNSNames); i++ {
 		fmt.Printf("%d: %s\n", i+1, req.DNSNames[i])
