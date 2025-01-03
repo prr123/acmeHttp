@@ -83,7 +83,6 @@ func main() {
     	if dbg {certObj.PrintCertObj()}
 	fmt.Println("************ input files ***********")
 
-	os.Exit(0)
 
 	// generate acme client and retrieve let's encrypt account
     err = certObj.GetAcmeClient()
@@ -91,6 +90,7 @@ func main() {
 
     if dbg {certLib.PrintClient(certObj.Client)}
     if dbg {certLib.PrintAccount(certObj.LEAccount)}
+
 
 	// get authorisation order from Let's Encrypt
 	order, err := certObj.GetAuthOrder(CrList)
@@ -104,49 +104,32 @@ func main() {
 	CrList, err = certObj.GetAuthFromOrder(CrList, order)
 	if err != nil {log.Fatalf("error -- GetAuthAndToken: %v\n", err)}
 
-	log.Printf("info -- created all dns challenge records!")
+	log.Printf("info -- created all https challenge records!")
 
-	// create a timing loop to check whether probagation was successful
-/*
-	prob := false
-	for i:=0; i< 5; i++ {
-		time.Sleep(5*time.Minute)
-		log.Printf("info -- time loop [%d]: %s\n", i+1, time.Now().Format(time.RFC1123))
+	// create server to receive challenge
+	// we can implement different challenge methods
 
-		err = certLib.CheckDnsProbagation(CrList)
-		if err != nil {
-			errStr := err.Error()
-			if idx := strings.Index(errStr, "acme dns rec not yet found"); idx>1 {
-				log.Printf("info -- probagation not yet successful!\n")
-			} else {
-				log.Fatalf("error -- CheckDnsProbagation: %v\n", err)
-			}
-		} else {
-			prob = true
-			break
-		}
-	}
 
-	if !prob {log.Fatalf("error -- could not find Dns Chal recs after 5 wait periods!\n")}
-
-	log.Printf("info -- challenge has propagated: start processing order\n")
-*/
-
+	// submit that challenge is ready
 	err = certObj.SubmitChallenge(CrList)
 	if err != nil {log.Fatalf("error -- Submit Challenge: %v\n", err)}
 	log.Printf("info -- Challenge accepted!\n")
 
 	ordUrl := order.URI
 
+	// activate server and shutdown server after challenge was received
+	err = certLib.StartHttp(&(CrList[0]), 15)
+	if err !=nil {log.Fatalf("error -- starting http: %v\n", err)}
+
 	acmeOrder, err := certObj.GetOrderAndWait(ordUrl)
 	if err !=nil {log.Fatalf("error -- WaitGetOrder: %v\n", err)}
 	log.Printf("info -- received order\n")
     if certObj.Dbg {certLib.PrintOrder(acmeOrder)}
 
-	err = certObj.CreateCerts(CrList[0])
+	err = certObj.CreateCerts(&(CrList[0]))
 	if err != nil { log.Fatalf("error -- CreateCerts: %v\n", err)}
 
 	log.Printf("info -- success createCerts\n")
-
+    if certObj.Dbg {certLib.PrintOrder(acmeOrder)}
 }
 
