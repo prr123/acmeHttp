@@ -5,7 +5,7 @@
 // date: 29 Dec 2024
 // copyright 2024 prr, azulsoftware
 //
-// refactored 22 Jan 2024
+// refactored 2 Jan 2025
 //
 
 package certHttpLib
@@ -14,6 +14,9 @@ import (
     "log"
     "fmt"
     "os"
+    "io"
+    "net/http"
+    "sync"
     "time"
     "context"
 	"strings"
@@ -46,7 +49,7 @@ type LEObj struct {
 	PubKeyFilnam string `yaml:"PubKeyFilnam"`
 	Updated time.Time `yaml:"update"`
 	Contacts []string `yaml:"contacts"`
-	Type string `yaml:"AcntType:"`
+	Prod bool `yaml:"Prod"`
 	LEUrl string `yaml:"LEUrl"`
 }
 
@@ -76,7 +79,6 @@ type CrFil struct {
 type CrObj struct {
 //	CrFilnam string `yaml:"CrFilnam"`
     Zone string `yaml:"Domain"`
-//	ZoneId string `yaml:"ZoneId"`
 	Email string `yaml:"Email"`
 	Start time.Time `yaml:"Start"`
     Country string `yaml:"Country"`
@@ -96,11 +98,9 @@ type CrObj struct {
 
 
 type CertObj struct {
-//	ZoneDir string
 	CertDir string
 	CertName string
 	CertFilnam string
-//	ZoneFilnam string
 	AcntFilnam string
 	FinalUrl string
 	CertUrl string
@@ -215,12 +215,12 @@ func (certobj *CertObj) ReadCrFile(crnam string)(Cr []CrObj, err error) {
 	err = yaml.Unmarshal(crdat, &crfil)
 	if err != nil {return Cr, fmt.Errorf("CR Unmarshal: %v", err)}
 
-    acntFilnam := certobj.LeDir + "/" + crfil.Account + "Prod.yaml"
-    if !certobj.Prod {acntFilnam = certobj.LeDir + "/" + crfil.Account + "Test.yaml"}
+    acntFilnam := certobj.LeDir + "/" + crfil.Account + "LEProd.yaml"
+    if !certobj.Prod {acntFilnam = certobj.LeDir + "/" + crfil.Account + "LETest.yaml"}
 	certobj.AcntFilnam = acntFilnam
 
     certNam := "certTest" + crnam
-    if certobj.Prod {certNam = "certProd" + crnam}
+    if certobj.Prod {certNam = crnam}
 	certobj.CertName = certNam
 
 	noTime, _ := time.Parse(time.RFC822, "01 Jan 0001 00:00:00 UTC")
@@ -252,83 +252,6 @@ func (certobj *CertObj) WriteCrFinalFile(Cr []CrObj)(err error) {
 	return nil
 }
 
-func IsInZones(zones []cloudflare.Zone, CrList []CrObj) (NCrList[]CrObj, err error) {
-
-	log.Printf("info -- zones: %d\n", len(zones))
-	log.Printf("info -- CRList: %d\n", len(CrList))
-
-	match := false
-	for i:=0; i< len(CrList); i++ {
-		tgtZone := CrList[i]
-		fmt.Printf(" %d: %s\n", i+1, tgtZone.Zone)
-		idx := -1
-		for j:=0; j< len(zones); j++ {
-			if zones[j].Name == tgtZone.Zone {
-				CrList[i].ZoneId = zones[j].ID
-				match = true
-				idx = j
-				break
-			}
-		}
-		if idx == -1 { return CrList, fmt.Errorf("no match for zone: %s", tgtZone.Zone)}
-	}
-
-	if !match {return CrList, fmt.Errorf("no match found!")}
-	return CrList, nil
-}
-
-
-func (certobj *CertObj)CheckZonesForDNSChalRecords(crList []CrObj, ctx context.Context) (err error) {
-
-	api := certobj.api
-
-    rc := cloudflare.ResourceContainer{
-        Level: cloudflare.ZoneRouteLevel,
-//        Identifier: zoneId,
-    }
-
-    DnsPar:=cloudflare.ListDNSRecordsParams{
-		Type: "TXT",
-	}
-
-	for i:=0; i< len(crList); i++ {
-		acmeDomain := "_acme-challenge." + crList[i].Zone
-		if len(crList[i].ZoneId) == 0 {return fmt.Errorf("Zone[%d] %s has no Id!\n", i+1, crList[i].Zone)}
-
-		rc.Identifier = crList[i].ZoneId
-		DnsPar.Name = acmeDomain
-
-		// check cloudflare name servers
-		DnsRecList, _, err := api.ListDNSRecords(ctx, &rc, DnsPar)
-		if err != nil { return fmt.Errorf("Zone[%d] %s ListDnsRec: %v!\n", i+1, crList[i].Zone, err)}
-		if len(DnsRecList) > 0 {return fmt.Errorf("Zone[%d] %s found challenge record!\n", i+1, crList[i].Zone)}
-
-		// for probgated records
-		_, err = net.LookupTXT(acmeDomain)
-		if err != nil {
-            errStr := err.Error()
-//			fmt.Printf("lookup: %s\n", errStr)
-            idx := strings.Index(errStr, "no such host")
-//			fmt.Printf("idx: %d\n", idx)
-			if idx == -1 {
-				return fmt.Errorf("Lookup Zone %s: %v", crList[i].Zone, err)
-            }
-		}
-	}
-
-	return nil
-}
-
-
-func (certobj *CertObj) GetCfZoneList(ctx context.Context) (zones []cloudflare.Zone,err error){
-
-	api := certobj.api
-
-	zones, err = api.ListZones(ctx)
-    if err != nil {return zones, fmt.Errorf("error -- cannot get zones: %v\n", err)}
-
-    return zones, nil
-}
 */
 
 func (certobj *CertObj) SubmitChallenge(crList []CrObj) (err error) {
@@ -367,9 +290,11 @@ func (certobj *CertObj) GetOrderAndWait(ordUrl string)(ordUrlNew *acme.Order, er
 
     acmeOrder, err := client.WaitOrder(ctx, ordUrl)
     if err != nil {
-        if acmeOrder != nil {PrintOrder(acmeOrder)}
+//        if acmeOrder != nil {PrintOrder(acmeOrder)}
         return acmeOrder, fmt.Errorf("client.WaitOrder: %v\n",err)
     }
+
+	// todo sleep for [] seconds and try again
     if acmeOrder == nil {
 		fmt.Printf("acme order not processed yet!\n")
 		PrintOrder(acmeOrder)
@@ -381,7 +306,7 @@ func (certobj *CertObj) GetOrderAndWait(ordUrl string)(ordUrlNew *acme.Order, er
 
 }
 
-func (certobj *CertObj) CreateCerts(cr CrObj)(err error) {
+func (certobj *CertObj) CreateCerts(cr *CrObj)(err error) {
 
 	client := certobj.Client
 	ctx := certobj.Ctx
@@ -435,6 +360,7 @@ func (certobj *CertObj) CreateCerts(cr CrObj)(err error) {
 	if err != nil {return fmt.Errorf("invalid signature of cert req!")}
 	if certobj.Dbg {log.Printf("debug -- signature check was successful!\n")}
 
+	// this rew will return the CA cert in addition to the domain cert
     derCerts, certUrl, err := client.CreateOrderCert(ctx, certobj.FinalUrl, csr, true)
     if err != nil {return fmt.Errorf("CreateOrderCert: %v\n",err)}
 
@@ -446,6 +372,7 @@ func (certobj *CertObj) CreateCerts(cr CrObj)(err error) {
 
 	certobj.CertUrl = certUrl
 	certobj.CertFilnam = certFilnam
+	cr.CertUrl = certUrl
 
 	return nil
 }
@@ -860,9 +787,12 @@ func (certobj *CertObj) GetAuthFromOrder (CrList []CrObj, order *acme.Order) (cr
 		domain :=  CrList[i].Zone
         auth, err := client.GetAuthorization(ctx, url)
         if err != nil {return CrList, fmt.Errorf("client.GetAuthorisation: %v\n",err)}
+		// need to check status
+//		if auth.Status != "StatusValid" {return CrList, fmt.Errorf("GetAuthorisation status: %s\n", auth.Status)}
+		fmt.Printf("GetAuthorisation status: %s\n", auth.Status)
 
         if certobj.Dbg {
-			log.Printf("debug -- success getting authorization for domain: %s\n", domain)
+//			log.Printf("debug -- success getting authorization for domain: %s\n", domain)
 			PrintAuth(auth)
 		}
 
@@ -875,10 +805,10 @@ func (certobj *CertObj) GetAuthFromOrder (CrList []CrObj, order *acme.Order) (cr
             }
         }
 
+        if chal == nil {return CrList, fmt.Errorf("http-01 challenge is not available for zone %s", domain)}
+
 		CrList[i].token = chal.Token
 		CrList[i].tokURI = chal.URI
-
-        if chal == nil {return CrList, fmt.Errorf("dns-01 challenge is not available for zone %s", domain)}
 
 		if certobj.Dbg {
 			log.Printf("debug -- success obtaining challenge\n")
@@ -897,8 +827,8 @@ func (certobj *CertObj) GetAuthFromOrder (CrList []CrObj, order *acme.Order) (cr
 
 		// now we have path and token
 
-		crList[i].tokval = tokVal
-		crList[i].path = path
+		CrList[i].tokval = tokVal
+		CrList[i].path = path
 	}
 	return CrList, nil
 }
@@ -911,7 +841,7 @@ func PrintLEAcnt(acnt *LEObj) {
 	fmt.Printf("AcntId:     %s\n", acnt.AcntId)
 	fmt.Printf("update:     %s\n", acnt.Updated.Format(time.RFC1123))
 	fmt.Printf("LE Url:     %s\n", acnt.LEUrl)
-	fmt.Printf("type:       %s\n", acnt.Type)
+	fmt.Printf("Prod:       %t\n", acnt.Prod)
 	fmt.Printf("contacts:   %d\n", len(acnt.Contacts))
 	for i:=0; i< len(acnt.Contacts); i++ {
 		fmt.Printf("contact[%d]: %s\n", i+1, acnt.Contacts[i])
@@ -936,6 +866,74 @@ func PrintAccount (acnt *acme.Account) {
     fmt.Printf("  AgreedTerms: %s\n", acnt.AgreedTerms)
     fmt.Printf("  Authz: %s\n", acnt.Authz)
     fmt.Println("***************** End Acme Account ******************")
+}
+
+//http
+
+func StartHttp(CR *CrObj, wt int) (err error) {
+
+    log.Printf("starting HTTP server")
+
+    httpServerExitDone := &sync.WaitGroup{}
+
+    httpServerExitDone.Add(1)
+    srv := CR.startHttpServer(httpServerExitDone)
+
+    log.Printf("main: serving for %d seconds", wt)
+
+	wtd := time.Duration(wt)
+
+    time.Sleep(wtd * time.Second)
+
+    log.Printf("main: stopping HTTP server")
+
+    // now close the server gracefully ("shutdown")
+    // timeout could be given with a proper context
+    // (in real world you shouldn't use TODO()).
+    if err := srv.Shutdown(context.TODO()); err != nil {
+        return fmt.Errorf("http shutdown: %v", err) // failure/timeout shutting down the server gracefully
+    }
+
+    // wait for goroutine started in startHttpServer() to stop
+    // NOTE: as @sander points out in comments, this might be unnecessary.
+    httpServerExitDone.Wait()
+
+    log.Printf("http server done. exiting")
+
+	return nil
+}
+
+
+func (CR *CrObj) handler(w http.ResponseWriter, r *http.Request) {
+    fmt.Printf("request URI: %s\n", r.RequestURI)
+	fmt.Printf("path: %s\n", CR.path)
+	fmt.Printf("tokval: %s\n", CR.tokval)
+	if r.RequestURI == CR.path {
+		fmt.Println("matched")
+		io.WriteString(w, CR.tokval)
+		return
+	}
+    io.WriteString(w, "hello world\n")
+}
+
+func (CR *CrObj)startHttpServer(wg *sync.WaitGroup) (*http.Server) {
+
+    srv := &http.Server{Addr: ":80"}
+
+    http.HandleFunc("/", CR.handler)
+
+    go func() {
+        defer wg.Done() // let main know we are done cleaning up
+
+        // always returns error. ErrServerClosed on graceful close
+        if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+            // unexpected error. port in use?
+            log.Fatalf("ListenAndServe(): %v", err)
+        }
+    }()
+
+    // returning reference so caller can call Shutdown()
+    return srv
 }
 
 /*
@@ -1045,50 +1043,18 @@ func PrintOrder(ord *acme.Order) {
 
 func PrintCertInfo(cert x509.Certificate, i int){
 
-/*
-	sigAlgo := []string {
-		"Unknown",
-		"MD2WithRSA",  // Unsupported.
-		"MD5WithRSA",  // Only supported for signing, not verification.
-		"SHA1WithRSA", // Only supported for signing, and verification of CRLs, CSRs, and OCSP responses.
-		"SHA256WithRSA",
-		"SHA384WithRSA",
-		"SHA512WithRSA",
-		"DSAWithSHA1",   // Unsupported.
-		"DSAWithSHA256", // Unsupported.
-		"ECDSAWithSHA1", // Only supported for signing, and verification of CRLs, CSRs, and OCSP responses.
-		"ECDSAWithSHA256",
-		"ECDSAWithSHA384",
-		"ECDSAWithSHA512",
-		"SHA256WithRSAPSS",
-		"SHA384WithRSAPSS",
-		"SHA512WithRSAPSS",
-		"PureEd25519",
-	}
-
-	pubKeyAlgo := []string{
-		"Unknown",
-		"RSA",
-		"DSA", // Only supported for parsing.
-		"ECDSA",
-		"Ed25519",
-	}
-*/
 	fmt.Printf("******** Cert %d ********\n", i+1)
 	fmt.Printf("version: %d\n", cert.Version)
 	fmt.Printf("SerialNum: %s\n", (*cert.SerialNumber).String())
 
 	fmt.Printf("Signature Algo:    %s\n", cert.SignatureAlgorithm.String())
 	fmt.Printf("Public Key Algo: %s\n", cert.PublicKeyAlgorithm.String())
-//	fmt.Printf("Signature Algo[%d]: %s\n", cert.SignatureAlgorithm, sigAlgo[cert.SignatureAlgorithm])
-//	fmt.Printf("Public Key Algo[%d]: %s\n", cert.PublicKeyAlgorithm, pubKeyAlgo[cert.PublicKeyAlgorithm])
 
 	fmt.Printf("Not Before: %s\n", cert.NotBefore.Format(time.RFC1123))
 	fmt.Printf("Not After:  %s\n", cert.NotAfter.Format(time.RFC1123))
 
 
 	fmt.Printf("Issuer IsCA: %t\n", cert.IsCA)
-//	fmt.Printf("\nIssuer: \n")
 	PrintPkixNam(cert.Issuer)
 
 	fmt.Printf("\nSubject: \n")
@@ -1128,20 +1094,13 @@ func PrintCertInfo(cert x509.Certificate, i int){
 		}
 	}
 
-//	fmt.Printf("Extensions[%d]:\n", len(cert.Extensions))
-	switch len(cert.Extensions) {
-	case 0:
-		fmt.Printf("Extensions: ---\n")
-	case 1:
-		ext := cert.Extensions[0]
+	fmt.Printf("Extensions[%d]:\n", len(cert.Extensions))
+
+	for i:=0; i< len(cert.Extensions); i++ {
+		ext := cert.Extensions[i]
 		fmt.Printf("Extension: Id %d Value: %v Critical: %t\n", ext.Id, ext.Value, ext.Critical)
-	default:
-		fmt.Printf("Extensions: %d\n", len(cert.Extensions))
-		for k:=0; k< len(cert.Extensions); k++ {
-			ext := cert.Extensions[k]
-			fmt.Printf("  %d: Id %d Value: %v Critical: %t\n", k+1, ext.Id, ext.Value, ext.Critical)
-		}
 	}
+
 	fmt.Printf("Extra Extensions[%d]:\n", len(cert.ExtraExtensions))
 	fmt.Printf("Unhandled Crtical Extensions[%d]:\n", len(cert.UnhandledCriticalExtensions))
 
@@ -1368,20 +1327,6 @@ func PrintCsr(req *x509.CertificateRequest) {
 }
 
 
-func PrintCertObj(cert *CertObj) {
-
-	fmt.Printf("**************** certLibObj *****************\n")
-	fmt.Printf("Account File: %s\n", cert.AcntFilnam)
-//	fmt.Printf("ZoneDir:      %s\n", cert.ZoneDir)
-	fmt.Printf("CertDir:      %s\n", cert.CertDir)
-	fmt.Printf("LE Dir:       %s\n", cert.LeDir)
-//	fmt.Printf("CF Dir:       %s\n", cert.CfDir)
-	fmt.Printf("Csr Dir:      %s\n", cert.CsrDir)
-//	fmt.Printf("Cf Token:     %s\n", cert.CfToken)
-	fmt.Printf("Production:   %t\n", cert.Prod)
-	fmt.Printf("debug:        %t\n", cert.Dbg)
-	fmt.Printf("************** end certLibObj ***************\n")
-}
 
 func PrintCrList(CrList []CrObj) {
 
@@ -1408,6 +1353,17 @@ func PrintCrList(CrList []CrObj) {
 
 }
 
+func PrintCertObj2(cert *CertObj) {
+
+	fmt.Printf("**************** certLibObj *****************\n")
+	fmt.Printf("Account File: %s\n", cert.AcntFilnam)
+	fmt.Printf("CertDir:      %s\n", cert.CertDir)
+	fmt.Printf("LE Dir:       %s\n", cert.LeDir)
+	fmt.Printf("Csr Dir:      %s\n", cert.CsrDir)
+	fmt.Printf("Production:   %t\n", cert.Prod)
+	fmt.Printf("debug:        %t\n", cert.Dbg)
+	fmt.Printf("************** end certLibObj ***************\n")
+}
 
 func (c *CertObj) PrintCertObj() {
 
