@@ -10,5 +10,5 @@ To create an LE account see repositarty LEAccount.
 usage: ./createHttpCerts /cr=crname /type=prod|test /dbg
 
 program that creates a security certificate for https containg the zones (domains) listed in the cr file.
-A cr name should be the name of the domain using an underscore to separate the  primary from tht secondary:  
+A cr name should be the name of the domain using an underscore to separate the  primary from the secondary domain:  
 example: domain: example.com => crname: example_com.cr 
