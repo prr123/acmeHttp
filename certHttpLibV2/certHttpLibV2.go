@@ -11,7 +11,9 @@
 // refactored 2 Jan 2025
 //
 // V2 change directory references
+// 19/10/2025 remove env variable LEDIR
 //
+
 package certHttpLibV2
 
 import (
@@ -194,10 +196,11 @@ func InitCertLib(dbg bool, domain string, prod bool)(certobj *CertObj, err error
     cloudDir := os.Getenv("CLOUD")
     if len(cloudDir) == 0 {return nil, fmt.Errorf("could not resolve env CLOUD!")}
 
-    leDir := os.Getenv("LEDir")
-    if len(leDir) == 0 {return nil, fmt.Errorf("could not resolve env LEDir!")}
-	certObj.LeDir = leDir
+//    leDir := os.Getenv("LEDir")
+//    if len(leDir) == 0 {return nil, fmt.Errorf("could not resolve env LEDir!")}
 
+	leDir := cloudDir + "/LEAccount"
+	certObj.LeDir = leDir
 
 	devopsDir := cloudDir + "/domains/" + domain
 	_, err = os.Stat(devopsDir)
@@ -220,8 +223,6 @@ func InitCertLib(dbg bool, domain string, prod bool)(certobj *CertObj, err error
 func (certobj *CertObj) ReadCrFile(crFilnam string)(Cr []CrObj, err error) {
 
 	var crfil CrFil
-
-//	crFilnam := certobj.LeDir + "/csrList/" + crnam + ".cr"
 
     crdat, err := os.ReadFile(crFilnam)
     if err != nil {return Cr, fmt.Errorf("read cr file: %v\n", err)}
